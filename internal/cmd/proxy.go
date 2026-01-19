@@ -101,6 +101,7 @@ func createProxyConfig(
 	var errs []error
 	errs = append(errs, conf.initUpstreams(ctx, l, proxyConf))
 	errs = append(errs, conf.initEDNS(ctx, l, proxyConf))
+	errs = append(errs, conf.initFakeIP(ctx, l, proxyConf))
 	errs = append(errs, conf.initTLSConfig(proxyConf))
 	errs = append(errs, conf.initDNSCryptConfig(proxyConf))
 	errs = append(errs, conf.initListenAddrs(proxyConf))
@@ -288,6 +289,85 @@ func (conf *configuration) initBogusNXDomain(
 			config.BogusNXDomain = append(config.BogusNXDomain, p)
 		}
 	}
+}
+
+// initFakeIP inits FakeIP configuration.
+func (conf *configuration) initFakeIP(
+	ctx context.Context,
+	l *slog.Logger,
+	config *proxy.Config,
+) (err error) {
+	if !conf.FakeIPEnabled {
+		return nil
+	}
+
+	fakeIPConf := &proxy.FakeIPConfig{
+		Enabled:        true,
+		TTL:            conf.FakeIPTTL,
+		DomainSuffixes: conf.FakeIPDomainSuffix,
+	}
+
+	// Default TTL if not specified
+	if fakeIPConf.TTL == 0 {
+		fakeIPConf.TTL = 30
+	}
+
+	// Parse source IP ranges ("from")
+	fakeIPConf.SourceRanges = make([]netip.Prefix, 0, len(conf.FakeIPFrom))
+	for i, cidr := range conf.FakeIPFrom {
+		prefix, err := proxynetutil.ParseSubnet(cidr)
+		if err != nil {
+			return fmt.Errorf("parsing fakeip-from[%d] %q: %w", i, cidr, err)
+		}
+		fakeIPConf.SourceRanges = append(fakeIPConf.SourceRanges, prefix)
+	}
+
+	// Parse IPv4 pool
+	if conf.FakeIPIPv4Range != "" {
+		prefix, err := proxynetutil.ParseSubnet(conf.FakeIPIPv4Range)
+		if err != nil {
+			return fmt.Errorf("parsing fakeip-ipv4-range: %w", err)
+		}
+		if !prefix.Addr().Is4() {
+			return fmt.Errorf("fakeip-ipv4-range must be IPv4")
+		}
+		fakeIPConf.IPv4Pool = prefix
+	}
+
+	// Parse IPv6 pool
+	if conf.FakeIPIPv6Range != "" {
+		prefix, err := proxynetutil.ParseSubnet(conf.FakeIPIPv6Range)
+		if err != nil {
+			return fmt.Errorf("parsing fakeip-ipv6-range: %w", err)
+		}
+		if !prefix.Addr().Is6() {
+			return fmt.Errorf("fakeip-ipv6-range must be IPv6")
+		}
+		fakeIPConf.IPv6Pool = prefix
+	}
+
+	// Validation
+	if len(fakeIPConf.DomainSuffixes) == 0 {
+		return fmt.Errorf("fakeip-domain-suffix must not be empty when fakeip-enabled")
+	}
+	if !fakeIPConf.IPv4Pool.IsValid() && !fakeIPConf.IPv6Pool.IsValid() {
+		return fmt.Errorf("at least one of fakeip-ipv4-range or fakeip-ipv6-range must be specified")
+	}
+
+	config.FakeIPConfig = fakeIPConf
+
+	// Create and set FakeIP handler
+	config.BeforeRequestHandler = proxy.NewFakeIPHandler(fakeIPConf)
+
+	l.InfoContext(ctx, "fakeip is enabled",
+		"ttl", fakeIPConf.TTL,
+		"domain_suffixes", len(fakeIPConf.DomainSuffixes),
+		"source_ranges", len(fakeIPConf.SourceRanges),
+		"has_ipv4_pool", fakeIPConf.IPv4Pool.IsValid(),
+		"has_ipv6_pool", fakeIPConf.IPv6Pool.IsValid(),
+	)
+
+	return nil
 }
 
 // initTLSConfig inits the TLS config.

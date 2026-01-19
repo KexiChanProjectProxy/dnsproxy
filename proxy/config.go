@@ -272,6 +272,32 @@ type Config struct {
 	// PreferIPv6 tells the proxy to prefer IPv6 addresses when bootstrapping
 	// upstreams that use hostnames.
 	PreferIPv6 bool
+
+	// FakeIPConfig holds FakeIP configuration.  If nil, FakeIP is disabled.
+	FakeIPConfig *FakeIPConfig
+}
+
+// FakeIPConfig holds the configuration for FakeIP functionality.
+type FakeIPConfig struct {
+	// Enabled defines whether FakeIP functionality is enabled.
+	Enabled bool
+
+	// SourceRanges defines the source IP ranges (CIDR) that trigger FakeIP.
+	// FakeIP is only applied when the DNS client's IP is within these ranges.
+	SourceRanges []netip.Prefix
+
+	// DomainSuffixes defines the domain patterns to match for FakeIP.
+	// Domains matching these suffixes will receive fake IP responses.
+	DomainSuffixes []string
+
+	// IPv4Pool is the IPv4 CIDR range for allocating fake IPs.
+	IPv4Pool netip.Prefix
+
+	// IPv6Pool is the IPv6 CIDR range for allocating fake IPs.
+	IPv6Pool netip.Prefix
+
+	// TTL is the response TTL in seconds.  Default is 30.
+	TTL uint32
 }
 
 // PendingRequestsConfig is the configuration for tracking identical requests.

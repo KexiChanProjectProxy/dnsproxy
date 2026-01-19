@@ -94,6 +94,13 @@ type configuration struct {
 	// HostsFiles is the list of paths to the hosts files to resolve from.
 	HostsFiles []string `yaml:"hosts-files"`
 
+	// FakeIPFrom is the list of source IP CIDR ranges that trigger FakeIP.
+	// FakeIP is only applied when the DNS client's IP is in one of these ranges.
+	FakeIPFrom []string `yaml:"fakeip-from"`
+
+	// FakeIPDomainSuffix is the list of domain patterns to match for FakeIP.
+	FakeIPDomainSuffix []string `yaml:"fakeip-domain-suffix"`
+
 	// Timeout for outbound DNS queries to remote upstream servers in a
 	// human-readable form.  Default is 10s.
 	Timeout timeutil.Duration `yaml:"timeout"`
@@ -117,6 +124,9 @@ type configuration struct {
 
 	// CacheSizeBytes is the cache size in bytes.  Default is 64k.
 	CacheSizeBytes int `yaml:"cache-size"`
+
+	// FakeIPTTL is the TTL for FakeIP responses in seconds.  Default is 30.
+	FakeIPTTL uint32 `yaml:"fakeip-ttl"`
 
 	// Ratelimit is the maximum number of requests per second.
 	Ratelimit int `yaml:"ratelimit"`
@@ -145,6 +155,12 @@ type configuration struct {
 	//
 	// TODO(d.kolyshev): Use more suitable type.
 	TLSMaxVersion float32 `yaml:"tls-max-version"`
+
+	// FakeIPIPv4Range is the IPv4 CIDR range for allocating fake IPs.
+	FakeIPIPv4Range string `yaml:"fakeip-ipv4-range"`
+
+	// FakeIPIPv6Range is the IPv6 CIDR range for allocating fake IPs.
+	FakeIPIPv6Range string `yaml:"fakeip-ipv6-range"`
 
 	// help, if true, prints the command-line option help message and quit with
 	// a successful exit-code.
@@ -200,6 +216,9 @@ type configuration struct {
 	// lookups of private addresses, including the requests for authority
 	// records, such as SOA and NS.
 	UsePrivateRDNS bool `yaml:"use-private-rdns"`
+
+	// FakeIPEnabled defines whether FakeIP functionality is enabled or not.
+	FakeIPEnabled bool `yaml:"fakeip-enabled"`
 }
 
 // parseConfig returns options parsed from the command args or config file.  If
