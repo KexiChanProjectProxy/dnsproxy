@@ -158,8 +158,9 @@ func (c *cache) unpackItem(data []byte, req *dns.Msg) (ci *cacheItem, expired bo
 	filterMsg(res, m, req.AuthenticatedData, doBit, ttl)
 
 	return &cacheItem{
-		m: res,
-		u: string(b.Next(b.Len())),
+		m:   res,
+		u:   string(b.Next(b.Len())),
+		ttl: ttl,
 	}, expired
 }
 
