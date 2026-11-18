@@ -15,10 +15,11 @@ import (
 )
 
 // countingUpstream is an [upstream.Upstream] that counts exchanges and answers
-// with a single A record with the configured TTL.
+// with a single A record with the configured TTL, or with SERVFAIL.
 type countingUpstream struct {
-	calls atomic.Int32
-	ttl   uint32
+	calls    atomic.Int32
+	servFail atomic.Bool
+	ttl      uint32
 }
 
 // type check
@@ -29,6 +30,12 @@ func (u *countingUpstream) Exchange(m *dns.Msg) (resp *dns.Msg, err error) {
 	u.calls.Add(1)
 
 	resp = (&dns.Msg{}).SetReply(m)
+	if u.servFail.Load() {
+		resp.Rcode = dns.RcodeServerFailure
+
+		return resp, nil
+	}
+
 	resp.Answer = []dns.RR{&dns.A{
 		Hdr: dns.RR_Header{
 			Name:   m.Question[0].Name,
@@ -76,18 +83,44 @@ func TestProxy_RefreshCache(t *testing.T) {
 	assert.InDelta(t, 60*time.Second, ttl, float64(2*time.Second))
 	assert.Equal(t, int32(1), ups.calls.Load())
 
+	// The remaining TTL is only known up to a second.
+	_, refreshed, err = p.RefreshCache(ctx, newDCtx(), 60*time.Second)
+	require.NoError(t, err)
+	assert.True(t, refreshed)
+	assert.Equal(t, int32(2), ups.calls.Load())
+
 	// The cached item is cached but should be refreshed in advance.
 	ttl, refreshed, err = p.RefreshCache(ctx, newDCtx(), 2*time.Minute)
 	require.NoError(t, err)
 	assert.True(t, refreshed)
 	assert.Equal(t, 60*time.Second, ttl)
-	assert.Equal(t, int32(2), ups.calls.Load())
+	assert.Equal(t, int32(3), ups.calls.Load())
 
 	// The cache refreshed by RefreshCache is used by client requests.
 	d := newDCtx()
 	require.NoError(t, p.Resolve(ctx, d))
 	require.NotNil(t, d.Res)
-	assert.Equal(t, int32(2), ups.calls.Load())
+	assert.Equal(t, int32(3), ups.calls.Load())
+
+	// SERVFAIL doesn't replace the cached answer.
+	ups.servFail.Store(true)
+	_, refreshed, err = p.RefreshCache(ctx, newDCtx(), time.Hour)
+	assert.ErrorIs(t, err, ErrCacheRefreshServFail)
+	assert.False(t, refreshed)
+	assert.Equal(t, int32(4), ups.calls.Load())
+
+	ups.servFail.Store(false)
+	d = newDCtx()
+	require.NoError(t, p.Resolve(ctx, d))
+	require.Len(t, d.Res.Answer, 1)
+	assert.Equal(t, int32(4), ups.calls.Load())
+
+	// A cancelled context prevents querying the upstreams.
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	_, _, err = p.RefreshCache(cancelled, newDCtx(), time.Hour)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, int32(4), ups.calls.Load())
 
 	// Another refresh of the same key is in progress.
 	d = newDCtx()
@@ -98,7 +131,7 @@ func TestProxy_RefreshCache(t *testing.T) {
 	p.shortFlighter.reqs.Store(hex.EncodeToString(key), unit{})
 	_, _, err = p.RefreshCache(ctx, newDCtx(), time.Hour)
 	assert.ErrorIs(t, err, ErrCacheRefreshInProgress)
-	assert.Equal(t, int32(2), ups.calls.Load())
+	assert.Equal(t, int32(4), ups.calls.Load())
 }
 
 func TestProxy_RefreshCache_unavailable(t *testing.T) {
