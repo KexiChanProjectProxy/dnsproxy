@@ -150,3 +150,80 @@ func TestProxy_RefreshCache_unavailable(t *testing.T) {
 	assert.ErrorIs(t, err, ErrCacheRefreshUnavailable)
 	assert.Zero(t, ups.calls.Load())
 }
+
+// TestProxy_RefreshCache_parallelSingleUpstream checks that, by design, a
+// proactive refresh queries only one upstream in the parallel mode, while a
+// client request still queries all of them.
+func TestProxy_RefreshCache_parallelSingleUpstream(t *testing.T) {
+	first, second := &countingUpstream{ttl: 60}, &countingUpstream{ttl: 60}
+	p := mustNew(t, &Config{
+		Logger: testLogger,
+		UpstreamConfig: &UpstreamConfig{
+			Upstreams: []upstream.Upstream{first, second},
+		},
+		UpstreamMode:   UpstreamModeParallel,
+		TrustedProxies: defaultTrustedProxies,
+		CacheEnabled:   true,
+	})
+
+	calls := func() (n int32) { return first.calls.Load() + second.calls.Load() }
+
+	_, refreshed, err := p.RefreshCache(
+		context.Background(),
+		&DNSContext{Proto: ProtoUDP, Req: newHostTestMessage("refresh")},
+		0,
+	)
+	require.NoError(t, err)
+	assert.True(t, refreshed)
+	assert.Equal(t, int32(1), calls())
+}
+
+// idleUpstream is a [countingUpstream] that reports an idle connection.
+type idleUpstream struct {
+	countingUpstream
+	idle bool
+}
+
+// HasIdleConn implements the [upstream.IdleConnChecker] interface for
+// *idleUpstream.
+func (u *idleUpstream) HasIdleConn() (ok bool) { return u.idle }
+
+// TestProxy_RefreshCache_preferIdleConn checks that, by design, a proactive
+// refresh prefers the upstream with an established idle connection, and falls
+// back to the others only if it fails.
+func TestProxy_RefreshCache_preferIdleConn(t *testing.T) {
+	cold := &idleUpstream{countingUpstream: countingUpstream{ttl: 60}}
+	warm := &idleUpstream{countingUpstream: countingUpstream{ttl: 60}, idle: true}
+	p := mustNew(t, &Config{
+		Logger: testLogger,
+		UpstreamConfig: &UpstreamConfig{
+			Upstreams: []upstream.Upstream{cold, warm},
+		},
+		TrustedProxies: defaultTrustedProxies,
+		CacheEnabled:   true,
+	})
+
+	refresh := func(host string) {
+		_, refreshed, err := p.RefreshCache(
+			context.Background(),
+			&DNSContext{Proto: ProtoUDP, Req: newHostTestMessage(host)},
+			0,
+		)
+		require.NoError(t, err)
+		assert.True(t, refreshed)
+	}
+
+	for i := range 10 {
+		refresh("idle" + string(rune('a'+i)))
+	}
+	assert.Equal(t, int32(0), cold.calls.Load())
+	assert.Equal(t, int32(10), warm.calls.Load())
+
+	// SERVFAIL isn't an exchange error, so simulate a failing idle upstream by
+	// dropping its idle state: then both are candidates again.
+	warm.idle = false
+	for i := range 40 {
+		refresh("none" + string(rune('a'+i%26)) + string(rune('a'+i/26)))
+	}
+	assert.Positive(t, cold.calls.Load())
+}

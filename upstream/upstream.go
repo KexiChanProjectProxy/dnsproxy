@@ -46,6 +46,25 @@ type Upstream interface {
 	io.Closer
 }
 
+// IdleConnChecker is an optional interface that an [Upstream] implements to
+// report whether it currently holds an established connection that is ready
+// for reuse.  Upstreams that don't keep connections (e.g. plain UDP) don't
+// implement it.
+type IdleConnChecker interface {
+	// HasIdleConn returns true if there is an established idle connection to
+	// the upstream that the next exchange would reuse instead of dialing.  It
+	// is a best-effort hint and the connection may turn out to be unusable.
+	HasIdleConn() (ok bool)
+}
+
+// HasIdleConn returns true if u implements [IdleConnChecker] and reports an
+// idle connection.
+func HasIdleConn(u Upstream) (ok bool) {
+	c, isChecker := u.(IdleConnChecker)
+
+	return isChecker && c.HasIdleConn()
+}
+
 // QUICTracer creates [qlogwriter.Trace] instances for QUIC connection tracing.
 type QUICTracer interface {
 	// TraceForConnection creates a [qlogwriter.Trace] specific for a given

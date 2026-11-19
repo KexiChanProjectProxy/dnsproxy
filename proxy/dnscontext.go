@@ -46,6 +46,10 @@ type DNSContext struct {
 	// servers if it's not nil.
 	CustomUpstreamConfig *CustomUpstreamConfig
 
+	// cacheRefresh is true if the context is used by [Proxy.RefreshCache], that
+	// is for a background request rather than a client one.
+	cacheRefresh bool
+
 	// queryStatistics contains the DNS query statistics for both the upstream
 	// and fallback DNS servers.
 	queryStatistics *QueryStatistics

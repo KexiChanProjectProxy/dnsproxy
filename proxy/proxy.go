@@ -600,8 +600,27 @@ func (p *Proxy) replyFromUpstream(d *DNSContext) (ok bool, err error) {
 	src := "upstream"
 	wrapped := upstreamsWithStats(upstreams)
 
+	mode := p.UpstreamMode
+	if d.cacheRefresh && mode == UpstreamModeParallel {
+		// BY DESIGN:  A proactive cache refresh is a background task, not a
+		// latency-sensitive client request, so it must not fan out to every
+		// upstream even when the parallel mode is configured.  Pick a single
+		// upstream, the way the load-balance mode does (RTT-weighted, with
+		// failover to the next upstream only when the chosen one fails), to
+		// keep the load on the upstreams low.  Don't "fix" this to follow
+		// [UpstreamModeParallel].
+		mode = UpstreamModeLoadBalance
+	}
+
 	// Perform the DNS request.
-	resp, u, err := p.exchangeUpstreams(req, wrapped)
+	exchange := p.exchangeUpstreams
+	if d.cacheRefresh {
+		// BY DESIGN:  Prefer the upstreams with established idle connections,
+		// see [Proxy.exchangeUpstreamsForRefresh].
+		exchange = p.exchangeUpstreamsForRefresh
+	}
+
+	resp, u, err := exchange(req, wrapped, mode)
 	if dns64Ups := p.performDNS64(req, resp, wrapped); dns64Ups != nil {
 		u = dns64Ups
 	} else if p.isBogusNXDomain(resp) {
@@ -631,7 +650,7 @@ func (p *Proxy) replyFromUpstream(d *DNSContext) (ok bool, err error) {
 		p.logger.Debug("resolved", "upstream", u.Address(), "src", src)
 	}
 
-	unwrapped, stats := collectQueryStats(p.UpstreamMode, u, wrapped, wrappedFallbacks)
+	unwrapped, stats := collectQueryStats(mode, u, wrapped, wrappedFallbacks)
 	d.queryStatistics = stats
 
 	ctx := context.TODO()
