@@ -37,6 +37,11 @@ const ErrCacheRefreshUnavailable errors.Error = "cache refresh unavailable for r
 // for which it's cached, or zero if it's not cacheable.  A SERVFAIL response
 // isn't cached and [ErrCacheRefreshServFail] is returned for it.
 //
+// If the upstream mode is [UpstreamModeParallel], only a single upstream is
+// queried, picked as in [UpstreamModeLoadBalance], instead of all of them.  This
+// is by design: a proactive refresh isn't latency-sensitive and shouldn't
+// multiply the load on the upstreams.
+//
 // ctx is only checked before querying the upstreams, since the upstream
 // exchange can't be cancelled.
 func (p *Proxy) RefreshCache(
@@ -54,6 +59,7 @@ func (p *Proxy) RefreshCache(
 		return 0, false, ErrCacheRefreshUnavailable
 	}
 
+	dctx.cacheRefresh = true
 	dctx.calcFlagsAndSize()
 
 	// Request DNSSEC RRs the same way [Proxy.Resolve] does, so that the cache

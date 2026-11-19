@@ -150,3 +150,30 @@ func TestProxy_RefreshCache_unavailable(t *testing.T) {
 	assert.ErrorIs(t, err, ErrCacheRefreshUnavailable)
 	assert.Zero(t, ups.calls.Load())
 }
+
+// TestProxy_RefreshCache_parallelSingleUpstream checks that, by design, a
+// proactive refresh queries only one upstream in the parallel mode, while a
+// client request still queries all of them.
+func TestProxy_RefreshCache_parallelSingleUpstream(t *testing.T) {
+	first, second := &countingUpstream{ttl: 60}, &countingUpstream{ttl: 60}
+	p := mustNew(t, &Config{
+		Logger: testLogger,
+		UpstreamConfig: &UpstreamConfig{
+			Upstreams: []upstream.Upstream{first, second},
+		},
+		UpstreamMode:   UpstreamModeParallel,
+		TrustedProxies: defaultTrustedProxies,
+		CacheEnabled:   true,
+	})
+
+	calls := func() (n int32) { return first.calls.Load() + second.calls.Load() }
+
+	_, refreshed, err := p.RefreshCache(
+		context.Background(),
+		&DNSContext{Proto: ProtoUDP, Req: newHostTestMessage("refresh")},
+		0,
+	)
+	require.NoError(t, err)
+	assert.True(t, refreshed)
+	assert.Equal(t, int32(1), calls())
+}

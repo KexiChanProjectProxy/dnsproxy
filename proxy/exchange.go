@@ -11,14 +11,15 @@ import (
 	"gonum.org/v1/gonum/stat/sampleuv"
 )
 
-// exchangeUpstreams resolves req using the given upstreams.  It returns the DNS
-// response, the upstream that successfully resolved the request, and the error
-// if any.
+// exchangeUpstreams resolves req using the given upstreams according to mode.
+// It returns the DNS response, the upstream that successfully resolved the
+// request, and the error if any.
 func (p *Proxy) exchangeUpstreams(
 	req *dns.Msg,
 	ups []upstream.Upstream,
+	mode UpstreamMode,
 ) (resp *dns.Msg, u upstream.Upstream, err error) {
-	switch p.UpstreamMode {
+	switch mode {
 	case UpstreamModeParallel:
 		return upstream.ExchangeParallel(ups, req)
 	case UpstreamModeFastestAddr:
