@@ -137,6 +137,17 @@ func (p *dnsOverTLS) Exchange(req *dns.Msg) (reply *dns.Msg, err error) {
 	return reply, nil
 }
 
+// type check
+var _ IdleConnChecker = (*dnsOverTLS)(nil)
+
+// HasIdleConn implements the [IdleConnChecker] interface for *dnsOverTLS.
+func (p *dnsOverTLS) HasIdleConn() (ok bool) {
+	p.connsMu.Lock()
+	defer p.connsMu.Unlock()
+
+	return len(p.conns) > 0
+}
+
 // Close implements the [Upstream] interface for *dnsOverTLS.
 func (p *dnsOverTLS) Close() (err error) {
 	runtime.SetFinalizer(p, nil)

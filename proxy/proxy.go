@@ -613,7 +613,14 @@ func (p *Proxy) replyFromUpstream(d *DNSContext) (ok bool, err error) {
 	}
 
 	// Perform the DNS request.
-	resp, u, err := p.exchangeUpstreams(req, wrapped, mode)
+	exchange := p.exchangeUpstreams
+	if d.cacheRefresh {
+		// BY DESIGN:  Prefer the upstreams with established idle connections,
+		// see [Proxy.exchangeUpstreamsForRefresh].
+		exchange = p.exchangeUpstreamsForRefresh
+	}
+
+	resp, u, err := exchange(req, wrapped, mode)
 	if dns64Ups := p.performDNS64(req, resp, wrapped); dns64Ups != nil {
 		u = dns64Ups
 	} else if p.isBogusNXDomain(resp) {

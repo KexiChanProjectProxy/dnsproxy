@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/AdguardTeam/dnsproxy/internal/bootstrap"
@@ -87,6 +88,11 @@ type dnsOverHTTPS struct {
 
 	// timeout is used in HTTP client and for H3 probes.
 	timeout time.Duration
+
+	// lastOK is the Unix time in nanoseconds of the last successful exchange.
+	// It is used to estimate whether the HTTP client still has a live
+	// connection, since the HTTP transports don't expose that.
+	lastOK atomic.Int64
 }
 
 // newDoH returns the DNS-over-HTTPS Upstream.
@@ -185,7 +191,28 @@ func (p *dnsOverHTTPS) Exchange(req *dns.Msg) (resp *dns.Msg, err error) {
 		return nil, errors.WithDeferred(err, resErr)
 	}
 
+	p.lastOK.Store(time.Now().UnixNano())
+
 	return resp, err
+}
+
+// type check
+var _ IdleConnChecker = (*dnsOverHTTPS)(nil)
+
+// HasIdleConn implements the [IdleConnChecker] interface for *dnsOverHTTPS.
+// The HTTP transports don't expose their connections, so it reports true if the
+// client is alive and the last successful exchange happened less than
+// [transportDefaultIdleConnTimeout] ago.
+func (p *dnsOverHTTPS) HasIdleConn() (ok bool) {
+	p.clientMu.Lock()
+	hasClient := p.client != nil
+	p.clientMu.Unlock()
+
+	last := p.lastOK.Load()
+
+	return hasClient &&
+		last != 0 &&
+		time.Since(time.Unix(0, last)) < transportDefaultIdleConnTimeout
 }
 
 // Close implements the Upstream interface for *dnsOverHTTPS.

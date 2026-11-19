@@ -39,6 +39,14 @@ func (u *upstreamWithStats) Address() (addr string) {
 	return u.upstream.Address()
 }
 
+// type check
+var _ upstream.IdleConnChecker = (*upstreamWithStats)(nil)
+
+// HasIdleConn implements the [upstream.IdleConnChecker] for *upstreamWithStats.
+func (u *upstreamWithStats) HasIdleConn() (ok bool) {
+	return upstream.HasIdleConn(u.upstream)
+}
+
 // Close implements the [upstream.Upstream] for *upstreamWithStats.
 func (u *upstreamWithStats) Close() (err error) {
 	return u.upstream.Close()

@@ -70,6 +70,47 @@ func (p *Proxy) exchangeUpstreams(
 	return nil, nil, err
 }
 
+// exchangeUpstreamsForRefresh is like [Proxy.exchangeUpstreams] but for a
+// proactive cache refresh.
+//
+// BY DESIGN:  The refresh isn't latency-sensitive, so it prefers the upstreams
+// that already hold an established idle connection, even when they aren't the
+// best choice by RTT, to avoid dialing (and handshaking) new connections just
+// for a background task.  The other upstreams are only tried if all of the
+// ones with idle connections fail.  If none has an idle connection, all of
+// them are considered as usual.  The fastest-address mode is left as is.
+func (p *Proxy) exchangeUpstreamsForRefresh(
+	req *dns.Msg,
+	ups []upstream.Upstream,
+	mode UpstreamMode,
+) (resp *dns.Msg, u upstream.Upstream, err error) {
+	if mode == UpstreamModeFastestAddr {
+		return p.exchangeUpstreams(req, ups, mode)
+	}
+
+	var idle, rest []upstream.Upstream
+	for _, cand := range ups {
+		if upstream.HasIdleConn(cand) {
+			idle = append(idle, cand)
+		} else {
+			rest = append(rest, cand)
+		}
+	}
+
+	if len(idle) == 0 || len(rest) == 0 {
+		return p.exchangeUpstreams(req, ups, mode)
+	}
+
+	resp, u, err = p.exchangeUpstreams(req, idle, mode)
+	if err == nil {
+		return resp, u, nil
+	}
+
+	p.logger.Debug("refresh via idle conns failed, trying others", slogutil.KeyError, err)
+
+	return p.exchangeUpstreams(req, rest, mode)
+}
+
 // exchange returns the result of the DNS request exchange with the given
 // upstream and the elapsed time in milliseconds.  It uses the given clock to
 // measure the request duration.

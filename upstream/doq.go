@@ -222,6 +222,17 @@ func (p *dnsOverQUIC) Exchange(req *dns.Msg) (resp *dns.Msg, err error) {
 	return resp, err
 }
 
+// type check
+var _ IdleConnChecker = (*dnsOverQUIC)(nil)
+
+// HasIdleConn implements the [IdleConnChecker] interface for *dnsOverQUIC.
+func (p *dnsOverQUIC) HasIdleConn() (ok bool) {
+	p.connMu.Lock()
+	defer p.connMu.Unlock()
+
+	return p.conn != nil && p.conn.Context().Err() == nil
+}
+
 // Close implements the [Upstream] interface for *dnsOverQUIC.
 func (p *dnsOverQUIC) Close() (err error) {
 	p.connMu.Lock()

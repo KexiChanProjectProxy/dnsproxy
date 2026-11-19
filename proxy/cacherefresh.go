@@ -42,6 +42,11 @@ const ErrCacheRefreshUnavailable errors.Error = "cache refresh unavailable for r
 // is by design: a proactive refresh isn't latency-sensitive and shouldn't
 // multiply the load on the upstreams.
 //
+// Also by design, the upstreams that already hold an established idle
+// connection are preferred, even if they aren't the best by RTT, to avoid
+// dialing new connections for a background request.  The other upstreams are
+// used only if those fail.
+//
 // ctx is only checked before querying the upstreams, since the upstream
 // exchange can't be cancelled.
 func (p *Proxy) RefreshCache(
